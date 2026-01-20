@@ -340,13 +340,14 @@ export class RenderSystem extends System {
 
         const baseAngle = this._rotationTime * rotationSpeed;
         const charCount = text.length;
-        const charSpacing = fontSize * 0.6;
-        const totalTextLength = charCount * charSpacing;
-        const startAngle = baseAngle - (totalTextLength / (2 * offsetRadius));
+        const charSpacing = fontSize * 0.65;
+        const totalArcLength = charCount * charSpacing;
+        const angleSpan = totalArcLength / offsetRadius;
+        const startAngle = baseAngle - angleSpan / 2;
 
         for (let i = 0; i < charCount; i++) {
             const char = text[charCount - 1 - i];
-            const charAngle = startAngle + (i * charSpacing / offsetRadius);
+            const charAngle = startAngle + i * (angleSpan / charCount);
 
             const charX = Math.cos(charAngle) * offsetRadius;
             const charY = Math.sin(charAngle) * offsetRadius;

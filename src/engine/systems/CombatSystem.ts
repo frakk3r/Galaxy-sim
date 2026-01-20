@@ -58,13 +58,19 @@ export class CombatSystem extends System {
 
         this.on('trigger:enter', (data: any) => this._handleProjectileCollision(data));
         this.on('collision:enter', (data: any) => this._handleProjectileCollision(data));
-        this.on('ai:fire', (data: any) => this._handleFireRequest(data.entityId));
+        this.on('ai:fire', (data: any) => this._handleFireRequest(data.entityId, false, data.targetId));
         this.on('input:action:pressed', (data: any) => {
             if (data.action === 'fire_primary' || data.action === 'fire_secondary') {
                 const players = (this.world as any).getEntitiesByTag('player') as Entity[];
                 if (players.length > 0) {
                     const isSecondary = data.action === 'fire_secondary';
                     this._handleFireRequest(players[0].id, isSecondary);
+                }
+            }
+            if (data.action === 'fire_missile') {
+                const players = (this.world as any).getEntitiesByTag('player') as Entity[];
+                if (players.length > 0) {
+                    this._handleFireRequest(players[0].id, true);
                 }
             }
         });
@@ -104,9 +110,13 @@ export class CombatSystem extends System {
 
                 const primaryPressed = inputSystem.isActionPressed('fire_primary');
                 const secondaryPressed = inputSystem.isActionPressed('fire_secondary');
+                const missilePressed = inputSystem.isActionPressed('fire_missile');
 
-                if (primaryPressed || secondaryPressed) {
-                    this._handleFireRequest(playerId, secondaryPressed);
+                if (primaryPressed) {
+                    this._handleFireRequest(playerId, false);
+                }
+                if (secondaryPressed || missilePressed) {
+                    this._handleFireRequest(playerId, true);
                 }
             }
         }
@@ -148,12 +158,65 @@ export class CombatSystem extends System {
             const projectile = this.getComponent<ProjectileComponent>(projectileId, 'Projectile');
             if (!projectile) continue;
 
+            // Check if target still exists - if not, create a visual effect and destroy projectile
+            if (projectile.targetId !== null && !this.world!.entityExists(projectile.targetId)) {
+                // Create a "fizzle" effect to show the shot dissipated
+                this._createFizzleEffect(projectileId);
+                this._destroyProjectile(projectileId);
+                continue;
+            }
+
             projectile.lifetime -= deltaTime;
 
             if (projectile.lifetime <= 0) {
                 this._destroyProjectile(projectileId);
             }
         }
+    }
+
+    private _createFizzleEffect(projectileId: EntityId): void {
+        const transform = this.getComponent<TransformComponent>(projectileId, 'Transform');
+        if (!transform) return;
+
+        // Simple green circle effect (same size as smallest fragment)
+        const effectId = this.world!.createEntity('fizzle');
+        
+        this.world!.addComponent(effectId, 'Transform', createTransform({
+            x: transform.x,
+            y: transform.y,
+            rotation: 0,
+            scale: 1
+        }));
+
+        this.world!.addComponent(effectId, 'Renderable', createRenderable({
+            type: 'circle',
+            radius: 8,
+            fillColor: 'rgba(0, 255, 0, 0.7)',
+            strokeColor: '#88ff88',
+            strokeWidth: 2,
+            glowEnabled: false,
+            glowColor: '#00ff00',
+            glowIntensity: 0,
+            layer: 20,
+            alpha: 0.9
+        }));
+
+        this.world!.addComponent(effectId, 'Projectile', {
+            ownerId: -1,
+            targetId: null,
+            damage: 0,
+            aoeDamage: 0,
+            damageType: DamageType.ENERGY,
+            weaponType: WeaponType.PROJECTILE,
+            lifetime: 0.15,
+            piercing: false,
+            maxPierces: 0,
+            pierceCount: 0,
+            explosionRadius: 0,
+            hitEntities: []
+        });
+
+        this._activeProjectiles.add(effectId);
     }
 
     private _updateShields(deltaTime: number): void {
@@ -208,7 +271,7 @@ export class CombatSystem extends System {
         }
     }
 
-    private _handleFireRequest(entityId: EntityId, isSecondary: boolean = false): void {
+    private _handleFireRequest(entityId: EntityId, isSecondary: boolean = false, targetId: EntityId | null = null): void {
         const weapon = this.getComponent<ShipWeaponComponent>(entityId, 'ShipWeapon');
         const transform = this.getComponent<TransformComponent>(entityId, 'Transform');
         const reactor = this.getComponent<ShipReactorComponent>(entityId, 'ShipReactor');
@@ -250,7 +313,7 @@ export class CombatSystem extends System {
             weapon.cooldown = 1 / (targetWeapon.fireRate ?? 1);
         }
 
-        this._createProjectile(entityId, targetWeapon as ShipWeaponComponent, transform, isSecondary);
+        this._createProjectile(entityId, targetWeapon as ShipWeaponComponent, transform, isSecondary, targetId);
 
         this._stats.projectilesFired++;
 
@@ -291,7 +354,7 @@ export class CombatSystem extends System {
         return true;
     }
 
-    private _createProjectile(shooterId: EntityId, weapon: ShipWeaponComponent, shooterTransform: TransformComponent, isSecondary: boolean = false): EntityId {
+    private _createProjectile(shooterId: EntityId, weapon: ShipWeaponComponent, shooterTransform: TransformComponent, isSecondary: boolean = false, targetId: EntityId | null = null): EntityId {
         const spawnDist = 20;
         const spread = (Math.random() - 0.5) * weapon.spread;
         const angle = shooterTransform.rotation + spread;
@@ -355,6 +418,7 @@ export class CombatSystem extends System {
 
         this.world!.addComponent(projectileId, 'Projectile', {
             ownerId: shooterId,
+            targetId: targetId,
             damage: weapon.damage!,
             aoeDamage: weapon.aoeDamage ?? 0,
             damageType: weapon.damageType!,
@@ -770,8 +834,13 @@ export class CombatSystem extends System {
         const collider = this.getComponent<ColliderComponent>(entityId, 'Collider');
         const reactor = this.getComponent<ShipReactorComponent>(entityId, 'ShipReactor');
 
-        if (transform && collider && collider.layer === CollisionLayer.ASTEROID) {
-            this._spawnAsteroidDebris(transform);
+        const wasAsteroid = transform && collider && collider.layer === CollisionLayer.ASTEROID;
+        const asteroidScale = transform?.scale || 1;
+        const asteroidX = transform?.x || 0;
+        const asteroidY = transform?.y || 0;
+
+        if (wasAsteroid) {
+            this._spawnAsteroidDebris(transform!);
         }
 
         if (transform && reactor) {
@@ -788,6 +857,15 @@ export class CombatSystem extends System {
         this._stats.entitiesDestroyed++;
 
         this.emit('combat:destroyed', { entityId });
+
+        // Emit asteroid destroyed event for AI fragment targeting
+        if (wasAsteroid && transform) {
+            this.emit('asteroid:destroyed', {
+                x: transform.x,
+                y: transform.y,
+                scale: asteroidScale
+            });
+        }
 
         this.world!.destroyEntity(entityId);
     }

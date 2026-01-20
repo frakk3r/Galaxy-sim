@@ -9,6 +9,7 @@ import { DamageType, DamageTypeEnum, WeaponType, WeaponTypeEnum } from './ShipWe
 
 export interface ProjectileComponent extends BaseComponent {
     ownerId: EntityId | null;
+    targetId: EntityId | null;  // Reference to the target this projectile was aimed at
     damage: number;
     aoeDamage: number;  // AOE damage for explosive weapons
     damageType: DamageTypeEnum;
@@ -24,6 +25,7 @@ export interface ProjectileComponent extends BaseComponent {
 export function createProjectile(config: Partial<ProjectileComponent> = {}): ProjectileComponent {
     return {
         ownerId: config.ownerId ?? null,
+        targetId: config.targetId ?? null,
         damage: config.damage ?? 10,
         aoeDamage: config.aoeDamage ?? 0,
         damageType: config.damageType ?? DamageType.KINETIC,

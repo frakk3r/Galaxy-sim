@@ -49,10 +49,16 @@ export class AISystem extends System {
     init(world: IWorld): void {
         super.init(world);
         this._steering = new SteeringBehaviors(world, {
-            rayAngleSpread: Math.PI * 0.9,
-            rayCount: 20,
-            rayLength: 500
+            rayAngleSpread: Math.PI * 2,
+            rayCount: 12,
+            rayLength: 400
         });
+
+        // Listen for asteroid destruction events for immediate fragment targeting
+        this.on('asteroid:destroyed', (data: { x: number; y: number; scale: number }) => {
+            this._handleAsteroidDestroyed(data.x, data.y, data.scale);
+        });
+
         console.log('[AISystem] Inizializzato con FSM avanzata');
     }
 
@@ -77,7 +83,23 @@ export class AISystem extends System {
 
         const localVelocity = velocity ?? { vx: 0, vy: 0, angularVelocity: 0, maxSpeed: 400, maxAngularSpeed: Math.PI * 2, drag: 2, angularDrag: 2 };
 
-        this._updateSensors(entityId, transform, collider ?? null, faction ?? null);
+        // Update sensors less frequently (every 0.15s) instead of every frame
+        ai.decisionTimer -= deltaTime;
+        const shouldUpdateSensors = ai.decisionTimer <= 0;
+        if (shouldUpdateSensors) {
+            ai.decisionTimer = ai.decisionInterval * (2 - ai.personality.reactionSpeed);
+            this._updateSensors(entityId, transform, collider ?? null, faction ?? null);
+        }
+
+        // Update emergency retreat cooldown
+        if (ai.emergencyRetreatCooldown > 0) {
+            ai.emergencyRetreatCooldown -= deltaTime;
+        }
+
+        // Update target switch cooldown (prevents firing at old target position)
+        if (ai.targetSwitchCooldown > 0) {
+            ai.targetSwitchCooldown -= deltaTime;
+        }
 
         const myFaction = faction?.factionId ?? 'neutral';
 
@@ -95,16 +117,13 @@ export class AISystem extends System {
             ai.state = AIState.RETREAT;
         }
 
-        ai.decisionTimer -= deltaTime;
-        if (ai.decisionTimer <= 0) {
-            ai.decisionTimer = ai.decisionInterval * (2 - ai.personality.reactionSpeed);
-            // Only make decisions if NOT in RETREAT
+        if (shouldUpdateSensors) {
             if (ai.state !== AIState.RETREAT) {
                 this._makeDecision(entityId, ai, transform, faction ?? null);
             }
         }
 
-        this._executeState(entityId, ai, transform, localVelocity, engine ?? null, deltaTime);
+        this._executeState(entityId, ai, transform, localVelocity, engine ?? null, deltaTime, shouldUpdateSensors);
 
         // If docked in RETREAT, force state back to RETREAT to prevent other states from taking over
         const dockingAfter = this.getComponent<DockingComponent>(entityId, 'Docking');
@@ -597,6 +616,11 @@ export class AISystem extends System {
         }
 
         this._applyThrustMovement(transform, velocity, engine, 0, 0, maxSpeed, deltaTime, 1.0, 1.0);
+        
+        // Apply obstacle avoidance
+        const avoidance = this._steering.obstacleAvoidance(transform, velocity, ai.sensors.obstacles, 400);
+        velocity.vx += avoidance.linear.x * deltaTime;
+        velocity.vy += avoidance.linear.y * deltaTime;
     }
 
     private _executeState(
@@ -605,7 +629,8 @@ export class AISystem extends System {
         transform: TransformComponent,
         velocity: VelocityComponent,
         engine: ShipEngineComponent | null,
-        deltaTime: number
+        deltaTime: number,
+        shouldUpdateSensors: boolean = true
     ): void {
         const reactor = this.getComponent<ShipReactorComponent>(entityId, 'ShipReactor');
         const maxSpeed = engine?.maxSpeed || 400;
@@ -689,47 +714,23 @@ export class AISystem extends System {
 
         velocity.angularVelocity = angleDiff * rotSpeed;
 
-        const shouldThrust = dist > 50;
-        const shouldBrake = dist < 150;
+        // Gradual slowing instead of automatic brake
+        const stoppingDistance = 80;
+        let thrustPower = thrust * 0.5;
+        
+        if (dist < stoppingDistance && dist > 0) {
+            // Slow down gradually as we approach target
+            thrustPower = thrust * 0.5 * (dist / stoppingDistance);
+        }
 
-        if (shouldThrust && !shouldBrake) {
-            const thrustPower = thrust * 0.5;
+        if (dist > 10) {
             velocity.vx += Math.cos(transform.rotation) * thrustPower * deltaTime;
             velocity.vy += Math.sin(transform.rotation) * thrustPower * deltaTime;
-        } else if (shouldBrake) {
-            velocity.vx *= 0.95;
-            velocity.vy *= 0.95;
+        } else if (dist <= 10 && dist > 0) {
+            // Very close - minimal thrust just to maintain position
+            velocity.vx *= 0.98;
+            velocity.vy *= 0.98;
         }
-
-        const currentSpeed = Math.sqrt(velocity.vx * velocity.vx + velocity.vy * velocity.vy);
-        if (currentSpeed > maxSpeed) {
-            const scale = maxSpeed / currentSpeed;
-            velocity.vx *= scale;
-            velocity.vy *= scale;
-        }
-    }
-
-    private _applyRetreatMovement(
-        transform: TransformComponent,
-        velocity: VelocityComponent,
-        engine: ShipEngineComponent | null,
-        retreatDirectionX: number,
-        retreatDirectionY: number,
-        maxSpeed: number,
-        deltaTime: number,
-        thrustMultiplier: number = 1.0
-    ): void {
-        const thrust = (engine?.thrustForward || 250) * thrustMultiplier;
-
-        const retreatDist = Math.sqrt(retreatDirectionX * retreatDirectionX + retreatDirectionY * retreatDirectionY);
-        if (retreatDist < 0.01) return;
-
-        const retreatDirNormX = retreatDirectionX / retreatDist;
-        const retreatDirNormY = retreatDirectionY / retreatDist;
-
-        const thrustPower = thrust * 0.8;
-        velocity.vx += retreatDirNormX * thrustPower * deltaTime;
-        velocity.vy += retreatDirNormY * thrustPower * deltaTime;
 
         const currentSpeed = Math.sqrt(velocity.vx * velocity.vx + velocity.vy * velocity.vy);
         if (currentSpeed > maxSpeed) {
@@ -747,58 +748,44 @@ export class AISystem extends System {
         safetyRadius: number
     ): { x: number; y: number } {
         if (ai.sensors.obstacles.length === 0) {
-            return { x: desiredDirX, y: desiredDirY };
+            const dist = Math.sqrt(desiredDirX * desiredDirX + desiredDirY * desiredDirY);
+            if (dist < 0.01) return { x: 1, y: 0 };
+            return { x: desiredDirX / dist, y: desiredDirY / dist };
         }
 
         const desiredDist = Math.sqrt(desiredDirX * desiredDirX + desiredDirY * desiredDirY);
         const desiredDirNormX = desiredDirX / desiredDist;
         const desiredDirNormY = desiredDirY / desiredDist;
+        const desiredAngle = Math.atan2(desiredDirNormY, desiredDirNormX);
 
-        let blocked = false;
-        for (const obstacle of ai.sensors.obstacles) {
-            const obstacleDx = Math.cos(obstacle.angle) * obstacle.distance;
-            const obstacleDy = Math.sin(obstacle.angle) * obstacle.distance;
-            const angleToObstacle = Math.atan2(obstacleDy, obstacleDx);
-            const angleToRetreat = Math.atan2(desiredDirY, desiredDirX);
-            let angleDiff = angleToObstacle - angleToRetreat;
-
-            while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
-            while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-
-            const obstacleAngleWidth = Math.atan2(safetyRadius, obstacle.distance);
-            if (Math.abs(angleDiff) < obstacleAngleWidth * 1.5) {
-                blocked = true;
-                break;
-            }
-        }
-
-        if (!blocked) {
-            return { x: desiredDirNormX, y: desiredDirNormY };
-        }
-
-        const numAngles = 16;
-        const angleStep = (Math.PI * 2) / numAngles;
-        let bestAngle = 0;
+        // Find best angle by checking directions around the desired one
+        const numAngles = 8;
+        const angleStep = Math.PI / numAngles;
+        let bestAngle = desiredAngle;
         let bestClearance = -1;
-        const searchAngle = Math.atan2(desiredDirY, desiredDirX);
 
-        for (let i = 0; i < numAngles; i++) {
-            const angleOffset = (i - numAngles / 2) * angleStep;
-            const testAngle = searchAngle + angleOffset;
+        for (let i = -numAngles; i <= numAngles; i++) {
+            const testAngle = desiredAngle + i * angleStep;
             const testDirX = Math.cos(testAngle);
             const testDirY = Math.sin(testAngle);
 
+            // Calculate minimum distance to any obstacle in this direction
             let minObsDist = Number.MAX_VALUE;
             for (const obstacle of ai.sensors.obstacles) {
-                const obsX = transform.x + Math.cos(obstacle.angle) * obstacle.distance;
-                const obsY = transform.y + Math.sin(obstacle.angle) * obstacle.distance;
-                const rayX = transform.x + testDirX * 300;
-                const rayY = transform.y + testDirY * 300;
-                const dx = rayX - obsX;
-                const dy = rayY - obsY;
-                const dist = Math.sqrt(dx * dx + dy * dy);
-                if (dist < minObsDist) {
-                    minObsDist = dist;
+                const obsX = Math.cos(obstacle.angle) * obstacle.distance;
+                const obsY = Math.sin(obstacle.angle) * obstacle.distance;
+                const toObsX = obsX - transform.x;
+                const toObsY = obsY - transform.y;
+                
+                // Project obstacle position onto test direction
+                const projDist = toObsX * testDirX + toObsY * testDirY;
+                const perpDist = Math.sqrt(toObsX * toObsX + toObsY * toObsY - projDist * projDist);
+                
+                if (projDist > 0 && perpDist < safetyRadius) {
+                    const clearance = projDist;
+                    if (clearance < minObsDist) {
+                        minObsDist = clearance;
+                    }
                 }
             }
 
@@ -840,45 +827,131 @@ export class AISystem extends System {
         const targetTags = (this.world as any).getEntity(targetId)?.tag || '';
         const isAsteroid = targetTags === 'asteroid';
 
-        if (isAsteroid) {
-            const health = this.getComponent<HealthComponent>(targetId, 'Health');
-            if (!health || health.current <= 0) {
-                ai.target = null;
-                ai.state = AIState.COLLECTING;
-                return;
-            }
-        }
+        // Note: Target validity check is handled in _makeDecision via asteroid:destroyed event
+        // This prevents duplicate checks and ensures immediate target updates
 
         const dx = targetTransform.x - transform.x;
         const dy = targetTransform.y - transform.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
 
         const targetRadius = this._getAsteroidSize(targetId);
-        const minDistance = targetRadius + 80;
+        const RETREAT_DISTANCE = targetRadius + 40;    // Emergency retreat threshold
+        const NEUTRAL_ZONE_MIN = targetRadius + 50;    // Neutral zone start
+        const NEUTRAL_ZONE_MAX = targetRadius + 120;   // Neutral zone end (optimal firing range)
+        const APPROACH_THRESHOLD = targetRadius + 200; // Start approaching
 
-        const inDangerZone = dist < targetRadius + 40;
-        const tooCloseToRetreat = dist < targetRadius + 50;
+        // Check for nearby obstacles (different from target) - emergency retreat
+        let nearbyObstacleDistance = Number.MAX_VALUE;
+        for (const obs of ai.sensors.obstacles) {
+            if (obs.entityId !== targetId && obs.distance < nearbyObstacleDistance) {
+                nearbyObstacleDistance = obs.distance;
+            }
+        }
 
-        if (inDangerZone) {
+        const EMERGENCY_OBSTACLE_THRESHOLD = 80;
+
+        // Check if initial approach is complete
+        if (!ai.initialApproachComplete && dist >= NEUTRAL_ZONE_MIN && dist <= NEUTRAL_ZONE_MAX) {
+            ai.initialApproachComplete = true;
+        }
+
+        // Check if we should use emergency retreat
+        const canUseEmergencyRetreat = ai.initialApproachComplete && ai.emergencyRetreatCooldown <= 0;
+
+        // Priority 1: Emergency retreat from nearby obstacles (only after initial approach)
+        if (canUseEmergencyRetreat && nearbyObstacleDistance < EMERGENCY_OBSTACLE_THRESHOLD) {
+            // Emergency retreat - fast backward movement
             const retreatDirX = -dx;
             const retreatDirY = -dy;
-            const safeRetreatDir = this._getSafeRetreatDirection(transform, ai, retreatDirX, retreatDirY, targetRadius + 50);
-            this._applyRetreatMovement(transform, velocity, engine, safeRetreatDir.x, safeRetreatDir.y, maxSpeed, deltaTime, 1.5);
-            this._faceTarget(entityId, transform, targetTransform, deltaTime, velocity);
-            this._tryFire(entityId, transform, ai, true);
+            const retreatDist = Math.sqrt(retreatDirX * retreatDirX + retreatDirY * retreatDirY);
+            
+            if (retreatDist > 0.01) {
+                const retreatDirNormX = retreatDirX / retreatDist;
+                const retreatDirNormY = retreatDirY / retreatDist;
+                
+                const retreatThrust = (engine?.thrustForward || 250) * 2.0;
+                velocity.vx += retreatDirNormX * retreatThrust * deltaTime;
+                velocity.vy += retreatDirNormY * retreatThrust * deltaTime;
+            }
+            // Set cooldown to prevent immediate re-entry
+            ai.emergencyRetreatCooldown = 0.5;
             return;
         }
 
-        const thrustMult = maxSpeed * 0.5 * ai.personality.miningEfficiency * energyMultiplier / maxSpeed;
-        this._applyThrustMovement(transform, velocity, engine, targetTransform.x, targetTransform.y, maxSpeed, deltaTime, thrustMult, 1.0);
-
-        this._faceTarget(entityId, transform, targetTransform, deltaTime, velocity);
-
-        if (dist < 200 && dist > minDistance) {
-            this._tryFire(entityId, transform, ai, true);
+        // Priority 2: Emergency retreat if target asteroid gets too close (only after initial approach)
+        if (canUseEmergencyRetreat && dist < RETREAT_DISTANCE) {
+            const retreatDirX = -dx;
+            const retreatDirY = -dy;
+            const retreatDist = Math.sqrt(retreatDirX * retreatDirX + retreatDirY * retreatDirY);
+            
+            if (retreatDist > 0.01) {
+                const retreatDirNormX = retreatDirX / retreatDist;
+                const retreatDirNormY = retreatDirY / retreatDist;
+                
+                const retreatThrust = (engine?.thrustForward || 250) * 2.0;
+                velocity.vx += retreatDirNormX * retreatThrust * deltaTime;
+                velocity.vy += retreatDirNormY * retreatThrust * deltaTime;
+            }
+            // Set cooldown to prevent immediate re-entry
+            ai.emergencyRetreatCooldown = 0.5;
+            return;
         }
 
-        if (tooCloseToRetreat && dist < 200) {
+        // Priority 3: Neutral zone - maintain position and fire continuously
+        if (dist >= NEUTRAL_ZONE_MIN && dist <= NEUTRAL_ZONE_MAX) {
+            // Maintain position - slight damping, no thrust
+            velocity.vx *= 0.98;
+            velocity.vy *= 0.98;
+            
+            // Calculate angle to target
+            const targetAngle = Math.atan2(dy, dx);
+            let angleDiff = Math.abs(targetAngle - transform.rotation);
+            while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+            while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+
+            // Fire if within cone (144 degrees)
+            if (Math.abs(angleDiff) < Math.PI * 0.8) {
+                this._tryFire(entityId, transform, ai, true);
+            }
+            return;
+        }
+
+        // Priority 4: Too far - approach
+        if (dist > APPROACH_THRESHOLD) {
+            const thrustMult = maxSpeed * 0.6 * ai.personality.miningEfficiency * energyMultiplier / maxSpeed;
+            this._applyThrustMovement(transform, velocity, engine, targetTransform.x, targetTransform.y, maxSpeed, deltaTime, thrustMult, 1.0);
+            
+            // Subtle obstacle avoidance during approach
+            for (const obs of ai.sensors.obstacles) {
+                if (obs.distance < 120 && obs.distance > 40 && obs.entityId !== targetId) {
+                    const pushStrength = (1 - obs.distance / 120) * 60;
+                    velocity.vx += Math.cos(obs.angle) * pushStrength * deltaTime;
+                    velocity.vy += Math.sin(obs.angle) * pushStrength * deltaTime;
+                }
+            }
+        }
+
+        // Priority 5: Between neutral zone and approach threshold - fire while moving toward zone
+        if (dist > NEUTRAL_ZONE_MAX && dist <= APPROACH_THRESHOLD) {
+            // Move slowly toward neutral zone
+            const approachThrust = maxSpeed * 0.3 * energyMultiplier / maxSpeed;
+            this._applyThrustMovement(transform, velocity, engine, targetTransform.x, targetTransform.y, maxSpeed, deltaTime, approachThrust, 1.0);
+            
+            // Subtle obstacle avoidance
+            for (const obs of ai.sensors.obstacles) {
+                if (obs.distance < 120 && obs.distance > 40 && obs.entityId !== targetId) {
+                    const pushStrength = (1 - obs.distance / 120) * 40;
+                    velocity.vx += Math.cos(obs.angle) * pushStrength * deltaTime;
+                    velocity.vy += Math.sin(obs.angle) * pushStrength * deltaTime;
+                }
+            }
+        }
+
+        // Face target for firing
+        this._faceTarget(entityId, transform, targetTransform, deltaTime, velocity);
+
+        // Fire if in range
+        if (dist < ai.attackRange) {
             this._tryFire(entityId, transform, ai, true);
         }
     }
@@ -974,6 +1047,11 @@ export class AISystem extends System {
         const thrustMult = maxSpeed * 1.0 * energyMultiplier / maxSpeed;
         this._applyThrustMovement(transform, velocity, engine, targetTransform.x, targetTransform.y, maxSpeed, deltaTime, thrustMult, 1.0);
 
+        // Apply obstacle avoidance
+        const avoidance = this._steering.obstacleAvoidance(transform, velocity, ai.sensors.obstacles, 400);
+        velocity.vx += avoidance.linear.x * deltaTime;
+        velocity.vy += avoidance.linear.y * deltaTime;
+
         this._faceTarget(entityId, transform, targetTransform, deltaTime, velocity);
     }
 
@@ -1017,6 +1095,11 @@ export class AISystem extends System {
 
         const thrustMult = maxSpeed * 0.5 * energyMultiplier / maxSpeed;
         this._applyThrustMovement(transform, velocity, engine, targetX, targetY, maxSpeed, deltaTime, thrustMult, 1.0);
+
+        // Apply obstacle avoidance during combat
+        const avoidance = this._steering.obstacleAvoidance(transform, velocity, ai.sensors.obstacles, 400);
+        velocity.vx += avoidance.linear.x * deltaTime;
+        velocity.vy += avoidance.linear.y * deltaTime;
 
         this._faceTarget(entityId, transform, targetTransform, deltaTime, velocity);
 
@@ -1066,6 +1149,10 @@ export class AISystem extends System {
         if (retreatPhase === 0) {
             if (distToStation > 150) {
                 this._applyThrustMovement(transform, velocity, engine, stationDockX, stationDockY, maxSpeed, deltaTime, 0.8, 2.0);
+                // Apply obstacle avoidance during retreat
+                const avoidance = this._steering.obstacleAvoidance(transform, velocity, ai.sensors.obstacles, 400);
+                velocity.vx += avoidance.linear.x * deltaTime;
+                velocity.vy += avoidance.linear.y * deltaTime;
                 return;
             }
 
@@ -1454,6 +1541,13 @@ export class AISystem extends System {
         const reactor = this.getComponent<ShipReactorComponent>(entityId, 'ShipReactor');
         if (reactor && reactor.currentEnergy < weapon.energyCost) return;
 
+        // Cooldown after target switch prevents firing at old target position
+        if (ai.targetSwitchCooldown > 0) return;
+
+        // Safety check: verify target still exists before firing
+        const targetEntity = (this.world as any).getEntity(targetId);
+        if (!targetEntity) return;
+
         this.emit('ai:fire', {
             entityId,
             targetId: ai.target.id,
@@ -1546,6 +1640,73 @@ export class AISystem extends System {
         }
 
         return { x: avoidX, y: avoidY };
+    }
+
+    private _handleAsteroidDestroyed(x: number, y: number, parentScale: number): void {
+        // Find all AI entities that were mining and are near this position
+        const entities = this.queryEntities(['AIController', 'Transform']);
+        
+        for (const entityId of entities) {
+            const ai = this.getComponent<AIControllerComponent>(entityId, 'AIController');
+            const transform = this.getComponent<TransformComponent>(entityId, 'Transform');
+            
+            if (!ai || !transform) continue;
+            
+            // Only affect AI that was mining
+            if (ai.state !== AIState.MINING) continue;
+            
+            const dx = transform.x - x;
+            const dy = transform.y - y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            
+            // Only affect AI that was near the destroyed asteroid (within 400px)
+            if (dist > 400) continue;
+            
+            // Look for fragments near the destruction point
+            const fragment = this._findNearestFragment(x, y, 200);
+            if (fragment) {
+                const fragTransform = this.getComponent<TransformComponent>(fragment, 'Transform');
+                if (fragTransform) {
+                    // Set new target to fragment immediately
+                    ai.target = {
+                        id: fragment,
+                        type: AITargetType.ASTEROID,
+                        position: { x: fragTransform.x, y: fragTransform.y },
+                        priority: 100
+                    };
+                    // Reset approach tracking for new target
+                    ai.initialApproachComplete = false;
+                    ai.emergencyRetreatCooldown = 0;
+                    // Short cooldown to prevent firing at old target position (backup safety)
+                    ai.targetSwitchCooldown = 0.03;
+                }
+            }
+        }
+    }
+
+    private _findNearestFragment(x: number, y: number, range: number): EntityId | null {
+        const asteroids = (this.world as any).getEntitiesByTag('asteroid') as any[];
+        if (asteroids.length === 0) return null;
+
+        let nearestId: EntityId | null = null;
+        let nearestDist = range;
+
+        for (const ast of asteroids) {
+            const t = this.getComponent<TransformComponent>(ast.id, 'Transform');
+            if (!t) continue;
+            
+            // Skip if already targeted by this AI (handled elsewhere)
+            const dx = t.x - x;
+            const dy = t.y - y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            
+            if (dist < nearestDist) {
+                nearestDist = dist;
+                nearestId = ast.id;
+            }
+        }
+
+        return nearestId;
     }
 
     private _areAllies(faction1: FactionComponent, faction2: FactionComponent): boolean {

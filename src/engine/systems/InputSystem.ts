@@ -20,6 +20,7 @@ export const InputAction = {
     // Combattimento
     FIRE_PRIMARY: 'fire_primary',
     FIRE_SECONDARY: 'fire_secondary',
+    FIRE_MISSILE: 'fire_missile',
     CYCLE_WEAPON: 'cycle_weapon',
     TARGET_NEXT: 'target_next',
     TARGET_PREV: 'target_prev',
@@ -55,7 +56,8 @@ const DEFAULT_KEY_BINDINGS: Record<string, string> = {
     'Space': InputAction.BRAKE,
     'MouseLeft': InputAction.FIRE_PRIMARY,
     'MouseRight': InputAction.FIRE_SECONDARY,
-    'KeyF': InputAction.FIRE_PRIMARY,
+    'KeyK': InputAction.FIRE_PRIMARY,
+    'KeyL': InputAction.FIRE_MISSILE,
     'KeyR': InputAction.CYCLE_WEAPON,
     'Tab': InputAction.TARGET_NEXT,
     'ShiftLeft+Tab': InputAction.TARGET_PREV,

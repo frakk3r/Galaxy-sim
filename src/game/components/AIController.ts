@@ -69,6 +69,9 @@ export interface AIControllerComponent extends BaseComponent {
     missileCooldown: number;
     repairTimer: number;
     energyLevel: number;
+    emergencyRetreatCooldown: number;
+    initialApproachComplete: boolean;
+    targetSwitchCooldown: number;
 }
 
 export function createAIController(config: Partial<AIControllerComponent> = {}): AIControllerComponent {
@@ -101,7 +104,10 @@ export function createAIController(config: Partial<AIControllerComponent> = {}):
         missileSlots: 4,
         missileCooldown: 0,
         repairTimer: 0,
-        energyLevel: 1.0
+        energyLevel: 1.0,
+        emergencyRetreatCooldown: 0,
+        initialApproachComplete: false,
+        targetSwitchCooldown: 0
     };
 }
 
