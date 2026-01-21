@@ -19,6 +19,7 @@ export const CollisionLayer = {
     STATION: 1 << 5,      // 32
     PICKUP: 1 << 6,       // 64
     TRIGGER: 1 << 7,      // 128
+    BOUNDARY: 1 << 8,     // 256
     ALL: 0xFFFFFFFF       // Tutti i layer
 } as const;
 

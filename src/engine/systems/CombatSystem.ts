@@ -529,19 +529,16 @@ export class CombatSystem extends System {
     }
 
     private _applyDamage(targetId: EntityId, source: { damage: number, damageType: DamageTypeEnum }): void {
-        let damage = source.damage;
+        const damage = source.damage;
         const damageType = source.damageType;
 
         console.log(`[Combat] _applyDamage called: targetId=${targetId}, damage=${damage}, damageType=${damageType}`);
 
-        // Check if target is an asteroid (has HealthComponent but NOT ShipHullComponent)
         const hasShipHull = !!this.getComponent<ShipHullComponent>(targetId, 'ShipHull');
         const hasHealth = !!this.getComponent<HealthComponent>(targetId, 'Health');
         const isAsteroid = hasHealth && !hasShipHull;
 
-        // Asteroids take FULL damage - no armor/shield reduction
         if (isAsteroid) {
-            console.log(`[Combat] Asteroid detected - applying FULL damage without reduction`);
             const health = this.getComponent<HealthComponent>(targetId, 'Health');
             if (health && !health.isInvulnerable) {
                 health.currentHealth -= damage;
@@ -567,70 +564,89 @@ export class CombatSystem extends System {
             return;
         }
 
-        // Ships take damage - Armor acts as a consumable buffer (max 50 total)
-        // Damage first reduces armor, overflow goes to hull
-        if (damage > 0) {
-            const hull = this.getComponent<ShipHullComponent>(targetId, 'ShipHull');
-            if (hull) {
-                let damageToHull = damage;
-                let armorAbsorbed = 0;
+        const shield = this.getComponent<ShipShieldComponent>(targetId, 'ShipShield');
+        const hull = this.getComponent<ShipHullComponent>(targetId, 'ShipHull');
 
-                // Damage reduces armor first (armor is a buffer, max 50)
-                if (hull.armor > 0) {
-                    if (hull.armor >= damage) {
-                        // All damage absorbed by armor
-                        armorAbsorbed = damage;
-                        hull.armor -= damage;
-                        damageToHull = 0;
-                        console.log(`[Combat] All ${damage} damage absorbed by armor, remaining armor: ${hull.armor}`);
-                    } else {
-                        // Armor depleted, overflow goes to hull
-                        armorAbsorbed = hull.armor;
-                        damageToHull = damage - hull.armor;
-                        hull.armor = 0;
-                        hull.currentHull -= damageToHull;
-                        console.log(`[Combat] Armor depleted (${armorAbsorbed} total absorbed), ${damageToHull} damage to hull, remaining hull: ${hull.currentHull.toFixed(1)}`);
-                    }
-                } else {
-                    // No armor, all damage to hull
-                    hull.currentHull -= damageToHull;
-                    console.log(`[Combat] No armor remaining, ${damageToHull} damage to hull, remaining hull: ${hull.currentHull.toFixed(1)}`);
-                }
+        if (shield && shield.isActive && shield.currentShield > 0) {
+            shield.currentShield -= damage;
+            shield.regenTimer = shield.regenDelay;
 
-                this._stats.damageDealt += damageToHull;
+            console.log(`[Combat] Applied ${damage} to shield, remaining: ${shield.currentShield.toFixed(1)}`);
+
+            let overflowDamage = 0;
+            if (shield.currentShield <= 0) {
+                overflowDamage = -shield.currentShield;
+                shield.currentShield = 0;
+                shield.isDown = true;
+                console.log(`[Combat] Shield depleted, overflow damage: ${overflowDamage}`);
+            }
+
+            this.emit('combat:damage', {
+                targetId,
+                damage: damage,
+                damageType,
+                remainingShield: shield.currentShield,
+                remainingMaxShield: shield.maxShield,
+                shieldDepleted: shield.currentShield <= 0
+            });
+
+            if (overflowDamage > 0 && hull) {
+                hull.currentHull -= overflowDamage;
+                console.log(`[Combat] Applied ${overflowDamage} overflow damage to hull, remaining: ${hull.currentHull.toFixed(1)}`);
+
+                this._stats.damageDealt += overflowDamage;
 
                 this.emit('combat:damage', {
                     targetId,
-                    damage: damageToHull,
+                    damage: overflowDamage,
                     damageType,
                     remainingHull: hull.currentHull,
-                    remainingArmor: hull.armor
+                    remainingMaxHull: hull.maxHull,
+                    isOverflow: true
                 });
 
                 if (hull.currentHull <= 0) {
                     this._destroyEntity(targetId);
                 }
-                return;
             }
+            return;
+        }
+
+        if (hull) {
+            hull.currentHull -= damage;
+            console.log(`[Combat] Applied ${damage} damage directly to hull, remaining: ${hull.currentHull.toFixed(1)}`);
+
+            this._stats.damageDealt += damage;
+
+            this.emit('combat:damage', {
+                targetId,
+                damage: damage,
+                damageType,
+                remainingHull: hull.currentHull,
+                remainingMaxHull: hull.maxHull
+            });
+
+            if (hull.currentHull <= 0) {
+                this._destroyEntity(targetId);
+            }
+            return;
         }
 
         if (damage > 0) {
             const health = this.getComponent<HealthComponent>(targetId, 'Health');
             if (health && !health.isInvulnerable) {
-                const resistance = health.resistances?.[damageType as keyof typeof health.resistances] ?? 1;
-                const effectiveDamage = Math.max(1, (damage * resistance) - health.armor);
-                health.currentHealth -= effectiveDamage;
-                console.log(`[Combat] Applied ${effectiveDamage} health damage to entity ${targetId}`);
+                health.currentHealth -= damage;
+                console.log(`[Combat] Applied ${damage} health damage to entity ${targetId}`);
 
-                health.lastDamageAmount = effectiveDamage;
+                health.lastDamageAmount = damage;
                 health.lastDamageType = damageType;
                 health.lastDamageTime = performance.now();
 
-                this._stats.damageDealt += effectiveDamage;
+                this._stats.damageDealt += damage;
 
                 this.emit('combat:damage', {
                     targetId,
-                    damage: effectiveDamage,
+                    damage: damage,
                     damageType,
                     remainingHealth: health.currentHealth
                 });
@@ -879,8 +895,8 @@ export class CombatSystem extends System {
         const newScale = parentTransform.scale * 0.6;
         const fragmentRadius = 28 * newScale;
 
-        const TRADER_STATION = { x: 1500, y: 0, shieldRadius: 550 };
-        const PIRATE_STATION = { x: -1500, y: 0, shieldRadius: 550 };
+        const TRADER_STATION = { x: 1700, y: 0, shieldRadius: 550 };
+        const PIRATE_STATION = { x: -1700, y: 0, shieldRadius: 550 };
         const SHIELD_MARGIN = 80;
 
         function isInsideAnyShield(x: number, y: number): boolean {

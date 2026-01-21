@@ -139,10 +139,10 @@ world.init();
 // CREAZIONE ENTITÀ DI TEST
 // ============================================================================
 
-const TRADER_STATION_POS = { x: 1500, y: 0, shieldRadius: 550 };
-const PIRATE_STATION_POS = { x: -1500, y: 0, shieldRadius: 550 };
-const MALAGASY_STATION_POS = { x: 0, y: 1500, shieldRadius: 550 };
-const OKROPODS_STATION_POS = { x: 0, y: -1500, shieldRadius: 550 };
+const TRADER_STATION_POS = { x: 1700, y: 0, shieldRadius: 550 };
+const PIRATE_STATION_POS = { x: -1700, y: 0, shieldRadius: 550 };
+const MALAGASY_STATION_POS = { x: 0, y: 1700, shieldRadius: 550 };
+const OKROPODS_STATION_POS = { x: 0, y: -1700, shieldRadius: 550 };
 const SHIELD_SPAWN_MARGIN = 80;
 
 function isInsideAnyShield(x: number, y: number): boolean {
@@ -1016,6 +1016,57 @@ const traderStationId = createStation('Misiks', TRADER_STATION_POS);
 const pirateStationId = createStation('Elarans', PIRATE_STATION_POS);
 const malagasyStationId = createStation('Malagasy', MALAGASY_STATION_POS);
 const okropodsStationId = createStation('Okropoyds', OKROPODS_STATION_POS);
+
+// Create map boundary (square 200px outside shield edges at ±550px from ±1700 = ±2450)
+const BOUNDARY = 2450;
+const WALL_THICKNESS = 20;
+
+// Create 4 boundary walls forming a square
+const boundaryWalls = [
+    { x: 0, y: -BOUNDARY - WALL_THICKNESS/2, width: BOUNDARY * 2 + WALL_THICKNESS * 2, height: WALL_THICKNESS }, // Top
+    { x: 0, y: BOUNDARY + WALL_THICKNESS/2, width: BOUNDARY * 2 + WALL_THICKNESS * 2, height: WALL_THICKNESS },  // Bottom
+    { x: -BOUNDARY - WALL_THICKNESS/2, y: 0, width: WALL_THICKNESS, height: BOUNDARY * 2 },  // Left
+    { x: BOUNDARY + WALL_THICKNESS/2, y: 0, width: WALL_THICKNESS, height: BOUNDARY * 2 }   // Right
+];
+
+for (const wall of boundaryWalls) {
+    const wallId = world.createEntity('boundary');
+    world.addComponent(wallId, 'Transform', createTransform({
+        x: wall.x,
+        y: wall.y,
+        rotation: 0,
+        scale: 1
+    }));
+    world.addComponent(wallId, 'Collider', createCollider({
+        type: 'aabb',
+        width: wall.width,
+        height: wall.height,
+        layer: CollisionLayer.BOUNDARY,
+        mask: CollisionLayer.PLAYER | CollisionLayer.ENEMY | CollisionLayer.ASTEROID,
+        isStatic: true,
+        isTrigger: false
+    }));
+    world.addComponent(wallId, 'Physics', createPhysics({
+        mass: Infinity,
+        isKinematic: true,
+        friction: 0,
+        restitution: 0
+    }));
+    world.addComponent(wallId, 'Renderable', createRenderable({
+        type: 'rect',
+        width: wall.width,
+        height: wall.height,
+        fillColor: '#ffff00',
+        strokeColor: '#cc9900',
+        strokeWidth: 2,
+        glowEnabled: true,
+        glowColor: '#ffcc00',
+        glowIntensity: 15,
+        layer: 3,
+        alpha: 0.9
+    }));
+}
+console.log(`[Main] Created ${boundaryWalls.length} boundary walls at ±${BOUNDARY}px`);
 
 // Spawn Elarans ships (at x=-1200, facing right toward center)
 createRedTradeShip(-1200, 100, 0, pirateStationId);

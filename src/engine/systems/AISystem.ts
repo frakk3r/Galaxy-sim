@@ -34,8 +34,8 @@ const LOOT_COLLECTION_RANGE = 100;
 const STATION_DOCKING_RANGE = 200;
 const STATION_SAFE_RANGE = 400;
 
-const TRADER_STATION_POS = { x: 1500, y: 0 };
-const PIRATE_STATION_POS = { x: -1500, y: 0 };
+const TRADER_STATION_POS = { x: 1700, y: 0 };
+const PIRATE_STATION_POS = { x: -1700, y: 0 };
 
 export class AISystem extends System {
     private _steering!: SteeringBehaviors;
@@ -811,9 +811,97 @@ export class AISystem extends System {
         deltaTime: number,
         energyMultiplier: number = 1.0
     ): void {
+        // IMMEDIATE TARGET VALIDITY CHECK - Critical for reactivity
+        if (ai.target && typeof ai.target.id === 'number') {
+            const currentTargetId = ai.target.id as EntityId;
+            const targetStillExists = this.world.entityExists ? this.world.entityExists(currentTargetId) : true;
+            if (!targetStillExists) {
+                // Target destroyed! Find new target immediately
+                ai.target = null;
+                
+                // Search for fragments within 400px
+                const fragment = this._findNearestFragment(transform.x, transform.y, 400);
+                if (fragment) {
+                    const fragTransform = this.getComponent<TransformComponent>(fragment, 'Transform');
+                    if (fragTransform) {
+                        ai.target = {
+                            id: fragment,
+                            type: AITargetType.ASTEROID,
+                            position: { x: fragTransform.x, y: fragTransform.y },
+                            priority: 100
+                        };
+                        ai.targetSwitchCooldown = 0;
+                        ai.initialApproachComplete = false;
+                    }
+                } else {
+                    // No fragments, search for nearby asteroids
+                    const asteroid = this._findBestAsteroid(transform, ai, entityId);
+                    if (asteroid) {
+                        ai.target = {
+                            id: asteroid.id,
+                            type: AITargetType.ASTEROID,
+                            position: { x: asteroid.x, y: asteroid.y },
+                            priority: 30
+                        };
+                        ai.targetSwitchCooldown = 0;
+                        ai.initialApproachComplete = false;
+                    }
+                }
+                
+                // Still no target? Try extended search
+                if (!ai.target) {
+                    const asteroids = (this.world as any).getEntitiesByTag('asteroid') as any[];
+                    let nearestDist = 600;  // Extended range
+                    let nearestAsteroid: { id: EntityId; x: number; y: number } | null = null;
+                    
+                    for (const ast of asteroids) {
+                        if (ast.id === currentTargetId) continue;
+                        const t = this.getComponent<TransformComponent>(ast.id, 'Transform');
+                        if (!t) continue;
+                        const dx = t.x - transform.x;
+                        const dy = t.y - transform.y;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+                        if (dist < nearestDist) {
+                            nearestDist = dist;
+                            nearestAsteroid = { id: ast.id, x: t.x, y: t.y };
+                        }
+                    }
+                    
+                    if (nearestAsteroid) {
+                        ai.target = {
+                            id: nearestAsteroid.id,
+                            type: AITargetType.ASTEROID,
+                            position: { x: nearestAsteroid.x, y: nearestAsteroid.y },
+                            priority: 25
+                        };
+                        ai.targetSwitchCooldown = 0;
+                        ai.initialApproachComplete = false;
+                    }
+                }
+                
+                // Still nothing? Stay in mining state and return to search next frame
+                if (!ai.target) {
+                    // Will search again next frame
+                }
+            }
+        }
+
         if (!ai.target || typeof ai.target.id !== 'number') {
-            ai.state = AIState.EXPLORE;
-            return;
+            // Find new target immediately
+            const asteroid = this._findBestAsteroid(transform, ai, entityId);
+            if (asteroid) {
+                ai.target = {
+                    id: asteroid.id,
+                    type: AITargetType.ASTEROID,
+                    position: { x: asteroid.x, y: asteroid.y },
+                    priority: 30
+                };
+                ai.targetSwitchCooldown = 0;
+                ai.initialApproachComplete = false;
+            } else {
+                ai.state = AIState.EXPLORE;
+                return;
+            }
         }
 
         const targetId = ai.target.id as EntityId;
@@ -1544,9 +1632,8 @@ export class AISystem extends System {
         // Cooldown after target switch prevents firing at old target position
         if (ai.targetSwitchCooldown > 0) return;
 
-        // Safety check: verify target still exists before firing
-        const targetEntity = (this.world as any).getEntity(targetId);
-        if (!targetEntity) return;
+        // Safety check: verify target still exists before firing (must use entityExists!)
+        if (!this.world.entityExists(targetId)) return;
 
         this.emit('ai:fire', {
             entityId,
@@ -1643,7 +1730,7 @@ export class AISystem extends System {
     }
 
     private _handleAsteroidDestroyed(x: number, y: number, parentScale: number): void {
-        // Find all AI entities that were mining and are near this position
+        // Find all AI entities targeting this asteroid (regardless of distance)
         const entities = this.queryEntities(['AIController', 'Transform']);
         
         for (const entityId of entities) {
@@ -1652,18 +1739,24 @@ export class AISystem extends System {
             
             if (!ai || !transform) continue;
             
-            // Only affect AI that was mining
+            // Only affect AI that was mining this specific asteroid
             if (ai.state !== AIState.MINING) continue;
+            if (!ai.target || typeof ai.target.id !== 'number') continue;
             
-            const dx = transform.x - x;
-            const dy = transform.y - y;
-            const dist = Math.sqrt(dx * dx + dy * dy);
+            // Check if target still exists and is the destroyed asteroid
+            const targetId = ai.target.id as EntityId;
+            if (!this.world.entityExists(targetId)) {
+                // Target already marked as destroyed - AI should already have new target from immediate check
+                continue;
+            }
             
-            // Only affect AI that was near the destroyed asteroid (within 400px)
-            if (dist > 400) continue;
+            // Get target entity tag to verify it's an asteroid
+            const targetEntity = (this.world as any).getEntity(targetId);
+            const targetTag = targetEntity?.tag || '';
+            if (targetTag !== 'asteroid') continue;
             
-            // Look for fragments near the destruction point
-            const fragment = this._findNearestFragment(x, y, 200);
+            // Look for fragments near the destruction point (expanded range)
+            const fragment = this._findNearestFragment(x, y, 350);
             if (fragment) {
                 const fragTransform = this.getComponent<TransformComponent>(fragment, 'Transform');
                 if (fragTransform) {
@@ -1677,8 +1770,21 @@ export class AISystem extends System {
                     // Reset approach tracking for new target
                     ai.initialApproachComplete = false;
                     ai.emergencyRetreatCooldown = 0;
-                    // Short cooldown to prevent firing at old target position (backup safety)
-                    ai.targetSwitchCooldown = 0.03;
+                    // Reset cooldown to allow immediate firing at new target
+                    ai.targetSwitchCooldown = 0;
+                }
+            } else {
+                // No fragments, find a new asteroid target
+                const asteroid = this._findBestAsteroid(transform, ai, entityId);
+                if (asteroid) {
+                    ai.target = {
+                        id: asteroid.id,
+                        type: AITargetType.ASTEROID,
+                        position: { x: asteroid.x, y: asteroid.y },
+                        priority: 30
+                    };
+                    ai.targetSwitchCooldown = 0;
+                    ai.initialApproachComplete = false;
                 }
             }
         }
@@ -1695,7 +1801,7 @@ export class AISystem extends System {
             const t = this.getComponent<TransformComponent>(ast.id, 'Transform');
             if (!t) continue;
             
-            // Skip if already targeted by this AI (handled elsewhere)
+            // Skip the destroyed asteroid (it's being removed)
             const dx = t.x - x;
             const dy = t.y - y;
             const dist = Math.sqrt(dx * dx + dy * dy);
