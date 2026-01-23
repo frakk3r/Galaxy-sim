@@ -89,7 +89,7 @@ export const COLLIDER_PRESETS: Record<string, Partial<ColliderComponent>> = {
         type: 'circle',
         radius: 3,
         layer: CollisionLayer.PROJECTILE,
-        mask: CollisionLayer.ENEMY | CollisionLayer.ASTEROID
+        mask: CollisionLayer.ENEMY | CollisionLayer.ASTEROID | CollisionLayer.BOUNDARY
     },
     STATION: {
         type: 'aabb',

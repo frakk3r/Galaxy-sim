@@ -1018,19 +1018,19 @@ const malagasyStationId = createStation('Malagasy', MALAGASY_STATION_POS);
 const okropodsStationId = createStation('Okropoyds', OKROPODS_STATION_POS);
 
 // Create map boundary (square 200px outside shield edges at ±550px from ±1700 = ±2450)
+// Create map boundary (square 200px outside shield edges at ±550px from ±1700)
 const BOUNDARY = 2450;
-const WALL_THICKNESS = 20;
 
-// Create 4 boundary walls forming a square
+// Create 4 invisible boundary walls (physics only, like station collision)
 const boundaryWalls = [
-    { x: 0, y: -BOUNDARY - WALL_THICKNESS/2, width: BOUNDARY * 2 + WALL_THICKNESS * 2, height: WALL_THICKNESS }, // Top
-    { x: 0, y: BOUNDARY + WALL_THICKNESS/2, width: BOUNDARY * 2 + WALL_THICKNESS * 2, height: WALL_THICKNESS },  // Bottom
-    { x: -BOUNDARY - WALL_THICKNESS/2, y: 0, width: WALL_THICKNESS, height: BOUNDARY * 2 },  // Left
-    { x: BOUNDARY + WALL_THICKNESS/2, y: 0, width: WALL_THICKNESS, height: BOUNDARY * 2 }   // Right
+    { x: 0, y: -BOUNDARY, width: BOUNDARY * 2, height: 10 }, // Top
+    { x: 0, y: BOUNDARY, width: BOUNDARY * 2, height: 10 },  // Bottom
+    { x: -BOUNDARY, y: 0, width: 10, height: BOUNDARY * 2 },  // Left
+    { x: BOUNDARY, y: 0, width: 10, height: BOUNDARY * 2 }   // Right
 ];
 
 for (const wall of boundaryWalls) {
-    const wallId = world.createEntity('boundary');
+    const wallId = world.createEntity('boundary_physics');
     world.addComponent(wallId, 'Transform', createTransform({
         x: wall.x,
         y: wall.y,
@@ -1052,21 +1052,41 @@ for (const wall of boundaryWalls) {
         friction: 0,
         restitution: 0
     }));
-    world.addComponent(wallId, 'Renderable', createRenderable({
+    // No Renderable - invisible physics barrier like station collision
+}
+
+// Create visual boundary lines (like station shields - graphics only)
+const boundaryLines = [
+    { x: 0, y: -BOUNDARY, width: BOUNDARY * 2, height: 4 }, // Top line
+    { x: 0, y: BOUNDARY, width: BOUNDARY * 2, height: 4 },  // Bottom line
+    { x: -BOUNDARY, y: 0, width: 4, height: BOUNDARY * 2 },  // Left line
+    { x: BOUNDARY, y: 0, width: 4, height: BOUNDARY * 2 }   // Right line
+];
+
+for (const line of boundaryLines) {
+    const lineId = world.createEntity('boundary_visual');
+    world.addComponent(lineId, 'Transform', createTransform({
+        x: line.x,
+        y: line.y,
+        rotation: 0,
+        scale: 1
+    }));
+    world.addComponent(lineId, 'Renderable', createRenderable({
         type: 'rect',
-        width: wall.width,
-        height: wall.height,
+        width: line.width,
+        height: line.height,
         fillColor: '#ffff00',
         strokeColor: '#cc9900',
         strokeWidth: 4,
         glowEnabled: true,
         glowColor: '#ffcc00',
         glowIntensity: 30,
-        layer: 3,
+        layer: 5,
         alpha: 1.0
     }));
+    // No Physics/Collider - visual only like station shields
 }
-console.log(`[Main] Created ${boundaryWalls.length} boundary walls at ±${BOUNDARY}px`);
+console.log(`[Main] Created boundary physics barriers and visual lines at ±${BOUNDARY}px`);
 
 // Spawn Elarans ships (at x=-1200, facing right toward center)
 createRedTradeShip(-1200, 100, 0, pirateStationId);
