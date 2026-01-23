@@ -1047,10 +1047,10 @@ for (const wall of boundaryWalls) {
         isTrigger: false
     }));
     world.addComponent(wallId, 'Physics', createPhysics({
-        mass: Infinity,
+        mass: 10000,
         isKinematic: true,
         friction: 0,
-        restitution: 0
+        restitution: 0.1
     }));
     // No Renderable - invisible physics barrier like station collision
 }
