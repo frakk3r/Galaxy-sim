@@ -1058,12 +1058,12 @@ for (const wall of boundaryWalls) {
         height: wall.height,
         fillColor: '#ffff00',
         strokeColor: '#cc9900',
-        strokeWidth: 2,
+        strokeWidth: 4,
         glowEnabled: true,
         glowColor: '#ffcc00',
-        glowIntensity: 15,
+        glowIntensity: 30,
         layer: 3,
-        alpha: 0.9
+        alpha: 1.0
     }));
 }
 console.log(`[Main] Created ${boundaryWalls.length} boundary walls at ±${BOUNDARY}px`);
