@@ -269,13 +269,15 @@ export class PhysicsSystem extends System {
         const massA = isKinematicA ? Infinity : (physicsA?.mass ?? 1);
         const massB = isKinematicB ? Infinity : (physicsB?.mass ?? 1);
 
-        // Controlla se collisiona con la stazione
+        // Controlla se collisiona con la stazione o boundary
         const isStationA = colliderA?.layer === CollisionLayer.STATION;
         const isStationB = colliderB?.layer === CollisionLayer.STATION;
-        const isStationCollision = isStationA || isStationB;
+        const isBoundaryA = colliderA?.layer === CollisionLayer.BOUNDARY;
+        const isBoundaryB = colliderB?.layer === CollisionLayer.BOUNDARY;
+        const isStationOrBoundaryCollision = isStationA || isStationB || isBoundaryA || isBoundaryB;
 
-        // SEPARAZIONE - disabilitata per collisioni con stazione per evitare teleport
-        if (!isStationCollision) {
+        // SEPARAZIONE - disabilitata per collisioni con stazione/boundary per evitare teleport
+        if (!isStationOrBoundaryCollision) {
             const effectiveDepth = Math.max(depth * this._separationBias, this._minSeparation);
 
             if (effectiveDepth > 0 && transformA && transformB) {

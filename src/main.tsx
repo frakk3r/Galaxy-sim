@@ -1020,13 +1020,14 @@ const okropodsStationId = createStation('Okropoyds', OKROPODS_STATION_POS);
 // Create map boundary (square 200px outside shield edges at ±550px from ±1700 = ±2450)
 // Create map boundary (square 200px outside shield edges at ±550px from ±1700)
 const BOUNDARY = 2450;
+const VISUAL_OFFSET = 2; // Offset lines inside physics barriers
 
 // Create 4 invisible boundary walls (physics only, like station collision)
 const boundaryWalls = [
-    { x: 0, y: -BOUNDARY, width: BOUNDARY * 2, height: 10 }, // Top
-    { x: 0, y: BOUNDARY, width: BOUNDARY * 2, height: 10 },  // Bottom
-    { x: -BOUNDARY, y: 0, width: 10, height: BOUNDARY * 2 },  // Left
-    { x: BOUNDARY, y: 0, width: 10, height: BOUNDARY * 2 }   // Right
+    { x: 0, y: -BOUNDARY, width: BOUNDARY * 2, height: 20 }, // Top - increased height
+    { x: 0, y: BOUNDARY, width: BOUNDARY * 2, height: 20 },  // Bottom - increased height
+    { x: -BOUNDARY, y: 0, width: 20, height: BOUNDARY * 2 },  // Left - increased width
+    { x: BOUNDARY, y: 0, width: 20, height: BOUNDARY * 2 }   // Right - increased width
 ];
 
 for (const wall of boundaryWalls) {
@@ -1055,12 +1056,12 @@ for (const wall of boundaryWalls) {
     // No Renderable - invisible physics barrier like station collision
 }
 
-// Create visual boundary lines (like station shields - graphics only)
+// Create visual boundary lines (like station shields - graphics only, offset inside)
 const boundaryLines = [
-    { x: 0, y: -BOUNDARY, width: BOUNDARY * 2, height: 4 }, // Top line
-    { x: 0, y: BOUNDARY, width: BOUNDARY * 2, height: 4 },  // Bottom line
-    { x: -BOUNDARY, y: 0, width: 4, height: BOUNDARY * 2 },  // Left line
-    { x: BOUNDARY, y: 0, width: 4, height: BOUNDARY * 2 }   // Right line
+    { x: 0, y: -BOUNDARY + VISUAL_OFFSET, width: BOUNDARY * 2, height: 4 }, // Top line - offset inside
+    { x: 0, y: BOUNDARY - VISUAL_OFFSET, width: BOUNDARY * 2, height: 4 },  // Bottom line - offset inside
+    { x: -BOUNDARY + VISUAL_OFFSET, y: 0, width: 4, height: BOUNDARY * 2 },  // Left line - offset inside
+    { x: BOUNDARY - VISUAL_OFFSET, y: 0, width: 4, height: BOUNDARY * 2 }   // Right line - offset inside
 ];
 
 for (const line of boundaryLines) {
