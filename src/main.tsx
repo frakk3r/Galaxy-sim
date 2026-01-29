@@ -1008,7 +1008,7 @@ function createStation(factionId: string, pos: { x: number, y: number }): Entity
 
 // Crea le entità
 const playerId = createPlayerShip();
-const asteroids = createAsteroids(40);
+const asteroids = createAsteroids(60);
 createPirateAsteroids(15);
 
 // Create all 4 stations

@@ -56,7 +56,7 @@ export class GameLoop {
         this._fixedDeltaTime = 1 / this._targetFPS;
         this._fixedDeltaMs = 1000 / this._targetFPS;
 
-        this._maxUpdatesPerFrame = options.maxUpdatesPerFrame || 3;
+        this._maxUpdatesPerFrame = options.maxUpdatesPerFrame || 10;
 
         this._state = LoopState.STOPPED;
         this._animationFrameId = null;

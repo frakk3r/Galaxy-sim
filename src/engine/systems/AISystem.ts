@@ -50,8 +50,8 @@ export class AISystem extends System {
         super.init(world);
         this._steering = new SteeringBehaviors(world, {
             rayAngleSpread: Math.PI * 2,
-            rayCount: 6,
-            rayLength: 300
+            rayCount: 12,
+            rayLength: 400
         });
 
         // Listen for asteroid destruction events for immediate fragment targeting
@@ -83,11 +83,11 @@ export class AISystem extends System {
 
         const localVelocity = velocity ?? { vx: 0, vy: 0, angularVelocity: 0, maxSpeed: 400, maxAngularSpeed: Math.PI * 2, drag: 2, angularDrag: 2 };
 
-        // Update sensors less frequently (every 0.3s) instead of every frame
+        // Update sensors less frequently (every 0.15s) instead of every frame
         ai.decisionTimer -= deltaTime;
         const shouldUpdateSensors = ai.decisionTimer <= 0;
         if (shouldUpdateSensors) {
-            ai.decisionTimer = Math.max(0.3, ai.decisionInterval * (2 - ai.personality.reactionSpeed));
+            ai.decisionTimer = ai.decisionInterval * (2 - ai.personality.reactionSpeed);
             this._updateSensors(entityId, transform, collider ?? null, faction ?? null);
         }
 
@@ -157,7 +157,7 @@ export class AISystem extends System {
         ai.sensors.loot = [];
 
         const myFaction = faction?.factionId ?? 'neutral';
-        const lootSightRange = ai.state === AIState.COLLECTING ? 600 : 400;
+        const lootSightRange = ai.state === AIState.COLLECTING ? 800 : 600;
 
         for (const otherId of allEntities) {
             if (otherId === entityId) continue;
@@ -170,12 +170,10 @@ export class AISystem extends System {
 
             const dx = otherTransform.x - transform.x;
             const dy = otherTransform.y - transform.y;
-            const distSq = dx * dx + dy * dy;
-            const sightRangeSq = ai.sightRange * ai.sightRange;
+            const dist = Math.sqrt(dx * dx + dy * dy);
 
-            if (distSq > sightRangeSq) continue;
+            if (dist > ai.sightRange) continue;
 
-            const dist = Math.sqrt(distSq);
             const angle = Math.atan2(dy, dx) - transform.rotation;
             let normalizedAngle = angle;
             while (normalizedAngle > Math.PI) normalizedAngle -= Math.PI * 2;
@@ -217,11 +215,9 @@ export class AISystem extends System {
 
             const dx = pTransform.x - transform.x;
             const dy = pTransform.y - transform.y;
-            const distSq = dx * dx + dy * dy;
-            const lootSightRangeSq = lootSightRange * lootSightRange;
+            const dist = Math.sqrt(dx * dx + dy * dy);
 
-            if (distSq > lootSightRangeSq) continue;
-            const dist = Math.sqrt(distSq);
+            if (dist > lootSightRange) continue;
 
             const angle = Math.atan2(dy, dx) - transform.rotation;
             let normalizedAngle = angle;
@@ -411,7 +407,7 @@ export class AISystem extends System {
         // Check if cargo is 80% full by volume (15 slots * 50 = 750 total capacity)
         const cargoPercent = cargo && cargo.capacity > 0 ? cargo.currentVolume / cargo.capacity : 0;
         if (cargo && cargoPercent >= 0.8) {
-            if (entityId <= 2) {
+            if (entityId <= 10) {
                 console.log(`[AISystem] AI ${entityId} cargo full: ${cargo.currentVolume}/${cargo.capacity} = ${Math.round(cargoPercent * 100)}%`);
             }
             if (ai.homeStationId) {
@@ -1188,12 +1184,10 @@ export class AISystem extends System {
         const thrustMult = maxSpeed * 0.5 * energyMultiplier / maxSpeed;
         this._applyThrustMovement(transform, velocity, engine, targetX, targetY, maxSpeed, deltaTime, thrustMult, 1.0);
 
-        // Apply obstacle avoidance during combat (reduced range)
-        if (ai.sensors.obstacles.length > 0) {
-            const avoidance = this._steering.obstacleAvoidance(transform, velocity, ai.sensors.obstacles, 250);
-            velocity.vx += avoidance.linear.x * deltaTime;
-            velocity.vy += avoidance.linear.y * deltaTime;
-        }
+        // Apply obstacle avoidance during combat
+        const avoidance = this._steering.obstacleAvoidance(transform, velocity, ai.sensors.obstacles, 400);
+        velocity.vx += avoidance.linear.x * deltaTime;
+        velocity.vy += avoidance.linear.y * deltaTime;
 
         this._faceTarget(entityId, transform, targetTransform, deltaTime, velocity);
 

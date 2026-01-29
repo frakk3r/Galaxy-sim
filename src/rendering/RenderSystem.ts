@@ -69,7 +69,7 @@ export class RenderSystem extends System {
     }
 
     private _initStarfield(): void {
-        const starCount = 200;
+        const starCount = 300;
         // Area virtuale grande per evitare pattern ripetitivi troppo evidenti
         const width = 2000; 
         const height = 2000;

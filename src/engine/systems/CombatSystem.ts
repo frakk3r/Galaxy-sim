@@ -96,6 +96,7 @@ export class CombatSystem extends System {
             if (now >= effect.destroyTime) {
                 if (this.world!.entityExists(effect.entityId)) {
                     this.world!.destroyEntity(effect.entityId);
+                    console.log(`[Combat] Destroyed explosion effect: entityId=${effect.entityId}`);
                 }
                 this._explosionEffects.splice(i, 1);
             }
@@ -430,7 +431,7 @@ export class CombatSystem extends System {
             hitEntities: []
         });
 
-
+        console.log(`[Combat] Created projectile: type=${weapon.weaponType}, damage=${weapon.damage}, aoeDamage=${weapon.aoeDamage ?? 0}, explRadius=${weapon.explosionRadius ?? 0}, hitbox=${hitboxRadius}px, render=${renderRadius}px`);
 
         this._activeProjectiles.add(projectileId);
 
@@ -473,7 +474,10 @@ export class CombatSystem extends System {
         if (projectile.hitEntities.includes(targetId)) return;
         projectile.hitEntities.push(targetId);
 
+        console.log(`[Combat] Projectile hit TARGET: targetId=${targetId}, directDamage=${projectile.damage}, aoeDamage=${projectile.aoeDamage}`);
+
         this._applyDamage(targetId, { damage: projectile.damage, damageType: projectile.damageType });
+        console.log(`[Combat] Applied DIRECT damage to target ${targetId}`);
 
         this._stats.projectilesHit++;
 
@@ -498,7 +502,9 @@ export class CombatSystem extends System {
                         impactX = projTransform.x - normal.x * projRadius;
                         impactY = projTransform.y - normal.y * projRadius;
                     }
+                    console.log(`[Combat] FIRST CONTACT: missileRadius=${projRadius}px, targetRadius=${targetRadius}px, impact=(${impactX.toFixed(0)}, ${impactY.toFixed(0)})`);
                 } else {
+                    console.log(`[Combat] Explosion at projectile center (no normal): (${projTransform.x.toFixed(0)}, ${projTransform.y.toFixed(0)})`);
                 }
 
                 this._createExplosion(impactX, impactY, projectile);
@@ -526,7 +532,7 @@ export class CombatSystem extends System {
         const damage = source.damage;
         const damageType = source.damageType;
 
-
+        console.log(`[Combat] _applyDamage called: targetId=${targetId}, damage=${damage}, damageType=${damageType}`);
 
         const hasShipHull = !!this.getComponent<ShipHullComponent>(targetId, 'ShipHull');
         const hasHealth = !!this.getComponent<HealthComponent>(targetId, 'Health');
@@ -536,6 +542,7 @@ export class CombatSystem extends System {
             const health = this.getComponent<HealthComponent>(targetId, 'Health');
             if (health && !health.isInvulnerable) {
                 health.currentHealth -= damage;
+                console.log(`[Combat] Applied ${damage} FULL damage to asteroid ${targetId}, remaining: ${health.currentHealth.toFixed(1)}`);
 
                 health.lastDamageAmount = damage;
                 health.lastDamageType = damageType;
@@ -564,12 +571,14 @@ export class CombatSystem extends System {
             shield.currentShield -= damage;
             shield.regenTimer = shield.regenDelay;
 
+            console.log(`[Combat] Applied ${damage} to shield, remaining: ${shield.currentShield.toFixed(1)}`);
 
             let overflowDamage = 0;
             if (shield.currentShield <= 0) {
                 overflowDamage = -shield.currentShield;
                 shield.currentShield = 0;
                 shield.isDown = true;
+                console.log(`[Combat] Shield depleted, overflow damage: ${overflowDamage}`);
             }
 
             this.emit('combat:damage', {
@@ -583,6 +592,7 @@ export class CombatSystem extends System {
 
             if (overflowDamage > 0 && hull) {
                 hull.currentHull -= overflowDamage;
+                console.log(`[Combat] Applied ${overflowDamage} overflow damage to hull, remaining: ${hull.currentHull.toFixed(1)}`);
 
                 this._stats.damageDealt += overflowDamage;
 
@@ -604,6 +614,7 @@ export class CombatSystem extends System {
 
         if (hull) {
             hull.currentHull -= damage;
+            console.log(`[Combat] Applied ${damage} damage directly to hull, remaining: ${hull.currentHull.toFixed(1)}`);
 
             this._stats.damageDealt += damage;
 
@@ -625,6 +636,7 @@ export class CombatSystem extends System {
             const health = this.getComponent<HealthComponent>(targetId, 'Health');
             if (health && !health.isInvulnerable) {
                 health.currentHealth -= damage;
+                console.log(`[Combat] Applied ${damage} health damage to entity ${targetId}`);
 
                 health.lastDamageAmount = damage;
                 health.lastDamageType = damageType;
@@ -686,6 +698,7 @@ export class CombatSystem extends System {
         aoeDamage = 20;
         projectile.aoeDamage = 20;
 
+        console.log(`[Combat] Multi-pulse explosion at (${x.toFixed(0)}, ${y.toFixed(0)}): explRadius=${explRadius}px, aoeDamage=${aoeDamage}, pulses=4`);
 
         // Create a single persistent explosion visual effect (0.9s duration)
         const explosionId = this.world!.createEntity('explosion_multipulse');
@@ -711,6 +724,7 @@ export class CombatSystem extends System {
         }));
         this._explosionEffects.push({ entityId: explosionId, destroyTime: now + 900 });
         
+        console.log(`[Combat] Created multi-pulse explosion: entityId=${explosionId}, duration=0.9s`);
 
         // Helper function to apply AOE damage and flash effect
         const applyAOEPulse = (pulseNumber: number, delay: number) => {
@@ -725,6 +739,7 @@ export class CombatSystem extends System {
                     renderable.glowColor = '#ffff00';
                     renderable.glowIntensity = 60;
                     renderable.strokeWidth = 5;
+                    console.log(`[Combat] EXPLOSION FLASH #${pulseNumber} at ${delay}s`);
                 }
 
                 // Apply AOE damage
@@ -743,6 +758,7 @@ export class CombatSystem extends System {
                         const falloff = 1 - (dist / explRadius);
                         const damage = Math.round(aoeDamage * falloff);
                         if (damage > 0) {
+                            console.log(`[Combat] Pulse #${pulseNumber} AOE: entity ${entityId}: ${damage} (dist=${dist.toFixed(0)}px, falloff=${(falloff * 100).toFixed(0)}%)`);
                             this._applyDamage(entityId, { damage: damage, damageType: projectile.damageType });
                         }
                     }
@@ -770,6 +786,7 @@ export class CombatSystem extends System {
         applyAOEPulse(3, 600);   // 0.6s
         applyAOEPulse(4, 900);   // 0.9s
 
+        console.log(`[Combat] Scheduled 4 pulses at 0s, 0.3s, 0.6s, 0.9s`);
 
         this.emit('combat:explosion', {
             x, y,
@@ -907,6 +924,7 @@ export class CombatSystem extends System {
             let y = parentTransform.y + Math.sin(angle) * distance;
 
             if (isInsideAnyShield(x, y)) {
+                console.log(`[Combat] Frammento evitato dentro scudo, distrutto`);
                 this.world!.destroyEntity(debrisId);
                 continue;
             }
