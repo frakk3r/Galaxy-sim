@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Space Sim 2D</title>
+    <style>
+        /* Reset base */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        /* Sfondo spazio */
+        body {
+            background-color: #0a0a0f;
+            overflow: hidden;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: #ffffff;
+        }
+
+        /* Container principale */
+        #app {
+            width: 100vw;
+            height: 100vh;
+            position: relative;
+        }
+
+        /* Canvas di gioco */
+        #game-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Overlay UI (React) */
+        #ui-root {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none; /* Permette click sul canvas sotto */
+        }
+
+        /* Elementi UI cliccabili */
+        #ui-root > * {
+            pointer-events: auto;
+        }
+
+        /* Debug overlay temporaneo */
+        #debug-overlay {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 10px;
+            border-radius: 5px;
+            font-family: monospace;
+            font-size: 12px;
+            color: #0f0;
+            z-index: 1000;
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <!-- Canvas per il rendering del gioco -->
+        <canvas id="game-canvas"></canvas>
+        
+        <!-- Root per React UI -->
+        <div id="ui-root"></div>
+    </div>
+
+    <!-- Entry point -->
+    <script type="module" src="/src/main.tsx"></script>
+</body>
+</html>
